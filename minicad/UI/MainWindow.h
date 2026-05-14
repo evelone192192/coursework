@@ -1,0 +1,35 @@
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
+#include <QMainWindow>
+#include "Canvas.h"
+#include "../Logic/CommandManager.h"
+#include "../Logic/LayerManager.h"
+#include "../Core/Primitive.h"
+
+QT_BEGIN_NAMESPACE
+namespace Ui { class MainWindow; }
+QT_END_NAMESPACE
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+
+public:
+    MainWindow(QWidget* parent = nullptr);
+    ~MainWindow();
+
+private slots:
+    void on_actionAddLine_triggered();
+    void on_actionUndo_triggered();
+
+private:
+    Ui::MainWindow* ui;
+    Canvas* m_canvas;
+
+    std::vector<std::unique_ptr<Primitive>> m_primitives;
+
+    CommandManager m_commandManager;
+    LayerManager m_layerManager;
+};
+
+#endif
