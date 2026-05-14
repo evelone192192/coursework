@@ -7,8 +7,11 @@ public:
     Line(int id, int layerId, Point start, Point end);
     Type getType() const override;
     std::string getInfo() const override;
-    Point start() const { return m_start; }
-    Point end() const { return m_end; }
+
+    void move(double dx, double dy) override;
+
+    Point start() const;
+    Point end() const;
 private:
     Point m_start, m_end;
 };

@@ -12,11 +12,21 @@ public:
     enum class Type { Unknown, Line, Circle };
     Primitive(int id, int layerId);
     virtual ~Primitive() = default;
+
     virtual Type getType() const = 0;
     virtual std::string getInfo() const = 0;
+    virtual void move(double dx, double dy) = 0;
+
     int getId() const;
+    int getLayerId() const;
+    void setLayerId(int id);
+
+    unsigned int getColor() const;
+    void setColor(unsigned int color);
+
 protected:
     int m_id;
     int m_layerId;
+    unsigned int m_color = 0xFF000000;
 };
 #endif

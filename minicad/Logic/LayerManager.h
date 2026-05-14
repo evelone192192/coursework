@@ -7,6 +7,8 @@
 struct Layer {
     int id;
     std::string name;
+    bool visible = true;
+    int priority = 0;
 };
 
 class LayerManager {
@@ -19,6 +21,11 @@ public:
 
     int getActiveLayerId() const;
     void setActiveLayer(int id);
+
+    void setLayerPriority(int id, int priority);
+    std::map<int, int> getPriorityMap() const;
+
+    const std::map<int, Layer>& getAllLayers() const;
 
 private:
     std::map<int, Layer> m_layers;
