@@ -8,6 +8,7 @@
 #include "../Core/Primitive.h"
 #include "../Logic/CommandManager.h"
 #include "../Logic/LayerManager.h"
+#include "../Logic/SelectionManager.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -18,6 +19,9 @@ class MainWindow : public QMainWindow {
 public:
     MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
+private slots:
+    void undoAction();
+    void handleSelection(Point clickPoint);
 private:
     Ui::MainWindow* ui;
     Canvas* m_canvas;
@@ -25,5 +29,6 @@ private:
     std::vector<std::unique_ptr<Primitive>> m_primitives;
     CommandManager m_commandManager;
     LayerManager m_layerManager;
+    SelectionManager m_selectionManager;
 };
 #endif
