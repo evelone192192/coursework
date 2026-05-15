@@ -18,7 +18,6 @@ QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
-
 public:
     MainWindow(QWidget* parent = nullptr);
     ~MainWindow();
@@ -31,6 +30,9 @@ private slots:
     void changeColor();
     void assignLayer();
     void updateCanvas();
+
+    void saveDxf();
+    void loadDxf();
 
 private:
     Ui::MainWindow* ui;
@@ -45,5 +47,4 @@ private:
 
     void refreshLayerList();
 };
-
 #endif

@@ -5,20 +5,21 @@
 #include <QDockWidget>
 #include <QColorDialog>
 #include <QInputDialog>
+#include <QFileDialog>
 #include <QMessageBox>
 #include <QShortcut>
-#include <QKeySequence>
 #include <QLabel>
-#include <QDebug>
 
 #include "../Core/Line.h"
 #include "../Core/Circle.h"
 #include "../Core/GeometryCalc.h"
+#include "../Core/Primitive.h"
 #include "../Logic/AddPrimitiveCommand.h"
+#include "../IO/DXFConverter.h"
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     ui->setupUi(this);
-    this->setWindowTitle("Mini-CAD Engineering Shell v1.1");
+    this->setWindowTitle("Mini-CAD Engineering Shell");
     this->showMaximized();
 
     m_canvas = new Canvas(this);
@@ -30,23 +31,29 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     QLabel* coordLabel = new QLabel("X: 0.0, Y: 0.0", this);
     coordLabel->setMinimumWidth(150);
     ui->statusBar->addPermanentWidget(coordLabel);
-
     connect(m_canvas, &Canvas::mouseMoved, this, [coordLabel](Point p) {
         coordLabel->setText(QString("CURSOR X: %1, Y: %2").arg(p.x).arg(p.y));
         });
 
     m_propertyPanel = new PropertyPanel(this);
-    QDockWidget* dock = new QDockWidget("Object Inspector", this);
+    QDockWidget* dock = new QDockWidget("Inspector", this);
     dock->setWidget(m_propertyPanel);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
-    QToolBar* bar = new QToolBar("Toolbox", this);
-    addToolBar(bar);
+    QToolBar* bar = new QToolBar(this); addToolBar(bar);
+
+    QPushButton* btnOpen = new QPushButton("OPEN DXF", this); bar->addWidget(btnOpen);
+    connect(btnOpen, &QPushButton::clicked, this, &MainWindow::loadDxf);
+
+    QPushButton* btnSave = new QPushButton("SAVE DXF", this); bar->addWidget(btnSave);
+    connect(btnSave, &QPushButton::clicked, this, &MainWindow::saveDxf);
+
+    bar->addSeparator();
 
     QPushButton* btnSel = new QPushButton("SELECT", this); bar->addWidget(btnSel);
     connect(btnSel, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Select); updateCanvas(); });
 
-    QPushButton* btnEdit = new QPushButton("EDIT NODES", this); bar->addWidget(btnEdit);
+    QPushButton* btnEdit = new QPushButton("EDIT", this); bar->addWidget(btnEdit);
     connect(btnEdit, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Edit); updateCanvas(); });
 
     QPushButton* btnWall = new QPushButton("WALL", this); bar->addWidget(btnWall);
@@ -56,29 +63,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(btnCol, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Column); updateCanvas(); });
 
     bar->addSeparator();
-    QPushButton* btnColor = new QPushButton("COLOR", this); bar->addWidget(btnColor);
-    connect(btnColor, &QPushButton::clicked, this, &MainWindow::changeColor);
 
-    QPushButton* btnAssign = new QPushButton("SET LAYER", this); bar->addWidget(btnAssign);
-    connect(btnAssign, &QPushButton::clicked, this, &MainWindow::assignLayer);
-
-    bar->addSeparator();
-    m_layerCombo = new QComboBox(this);
-    bar->addWidget(m_layerCombo);
+    m_layerCombo = new QComboBox(this); bar->addWidget(m_layerCombo);
     refreshLayerList();
-    connect(m_layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int index) {
-        if (index >= 0) {
-            m_layerManager.setActiveLayer(m_layerCombo->itemData(index).toInt());
-            updateCanvas();
-        }
+    connect(m_layerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), [this](int i) {
+        if (i >= 0) { m_layerManager.setActiveLayer(m_layerCombo->itemData(i).toInt()); updateCanvas(); }
         });
 
-    QPushButton* btnAddLayer = new QPushButton("+ LAYER", this); bar->addWidget(btnAddLayer);
-    connect(btnAddLayer, &QPushButton::clicked, this, &MainWindow::addLayer);
+    QPushButton* btnAddL = new QPushButton("+L", this); bar->addWidget(btnAddL);
+    connect(btnAddL, &QPushButton::clicked, this, &MainWindow::addLayer);
 
     bar->addSeparator();
-    QShortcut* undoShortcut = new QShortcut(QKeySequence::Undo, this);
-    connect(undoShortcut, &QShortcut::activated, this, &MainWindow::undoAction);
+
+    QPushButton* btnUndo = new QPushButton("UNDO", this); bar->addWidget(btnUndo);
+    connect(btnUndo, &QPushButton::clicked, this, &MainWindow::undoAction);
 
     connect(m_canvas, &Canvas::lineFinished, this, [this](Point s, Point e) {
         auto obj = Primitive::create(Primitive::Type::Line,
@@ -103,25 +101,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
             updateCanvas();
         }
         });
-
     connect(m_canvas, &Canvas::objectClicked, this, &MainWindow::handleSelection);
     connect(m_canvas, &Canvas::objectMoved, this, &MainWindow::handleMove);
-
-    connect(m_canvas, &Canvas::vertexMoved, this, [this](int, int, Point newPos) {
+    connect(m_canvas, &Canvas::vertexMoved, this, [this](int, int, Point p) {
         if (m_selectionManager.isEmpty()) return;
-        int activeId = m_layerManager.getActiveLayerId();
-        int selId = *m_selectionManager.getSelectedIds().begin();
-        for (auto& obj : m_primitives) {
-            if (obj->getId() == selId && obj->getLayerId() == activeId) {
-                if (obj->getType() == Primitive::Type::Line) {
-                    Line* l = static_cast<Line*>(obj.get());
-                    if (GeometryCalc::distance(newPos, l->start()) < GeometryCalc::distance(newPos, l->end()))
-                        l->setStart(newPos);
-                    else l->setEnd(newPos);
+        int id = *m_selectionManager.getSelectedIds().begin();
+        for (auto& o : m_primitives) {
+            if (o->getId() == id && o->getLayerId() == m_layerManager.getActiveLayerId()) {
+                if (o->getType() == Primitive::Type::Line) {
+                    Line* l = static_cast<Line*>(o.get());
+                    if (GeometryCalc::distance(p, l->start()) < GeometryCalc::distance(p, l->end())) l->setStart(p);
+                    else l->setEnd(p);
                 }
-                else if (obj->getType() == Primitive::Type::Circle) {
-                    Circle* c = static_cast<Circle*>(obj.get());
-                    c->setRadius(GeometryCalc::distance(newPos, c->center()));
+                else if (o->getType() == Primitive::Type::Circle) {
+                    static_cast<Circle*>(o.get())->setRadius(GeometryCalc::distance(p, static_cast<Circle*>(o.get())->center()));
                 }
             }
         }
@@ -129,50 +122,68 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         });
 }
 
+void MainWindow::saveDxf() {
+    QString path = QFileDialog::getSaveFileName(this, "Save DXF", "", "DXF Files (*.dxf)");
+    if (!path.isEmpty()) {
+        if (DXFConverter::saveToFile(path.toStdString(), m_primitives))
+            QMessageBox::information(this, "Success", "File saved successfully!");
+        else
+            QMessageBox::critical(this, "Error", "Could not save file.");
+    }
+}
+
+void MainWindow::loadDxf() {
+    QString path = QFileDialog::getOpenFileName(this, "Open DXF", "", "DXF Files (*.dxf)");
+    if (!path.isEmpty()) {
+        auto loaded = DXFConverter::loadFromFile(path.toStdString());
+        if (!loaded.empty()) {
+            m_primitives.clear();
+            for (auto& item : loaded) m_primitives.push_back(std::move(item));
+            m_selectionManager.clear();
+            updateCanvas();
+            QMessageBox::information(this, "Success", "File loaded successfully!");
+        }
+        else {
+            QMessageBox::warning(this, "Warning", "File is empty or corrupted.");
+        }
+    }
+}
+
 void MainWindow::updateCanvas() {
     m_canvas->updateScene(m_primitives, m_selectionManager.getSelectedIds(), m_layerManager.getPriorityMap(), m_layerManager.getActiveLayerId());
 }
 
-void MainWindow::handleSelection(Point p, bool ctrlPressed) {
-    if (!ctrlPressed) m_selectionManager.clear();
-    Primitive* lastFound = nullptr;
-    int activeLayerId = m_layerManager.getActiveLayerId();
-    for (auto& obj : m_primitives) {
-        if (obj->getLayerId() != activeLayerId) continue;
+void MainWindow::handleSelection(Point p, bool ctrl) {
+    if (!ctrl) m_selectionManager.clear();
+    Primitive* last = nullptr;
+    int activeId = m_layerManager.getActiveLayerId();
+    for (auto& o : m_primitives) {
+        if (o->getLayerId() != activeId) continue;
         bool hit = false;
-        if (obj->getType() == Primitive::Type::Line) {
-            Line* l = static_cast<Line*>(obj.get());
-            hit = GeometryCalc::isPointNearLine(p, l->start(), l->end(), 10.0);
-        }
-        else {
-            Circle* c = static_cast<Circle*>(obj.get());
-            hit = GeometryCalc::isPointInCircle(p, c->center(), c->radius());
-        }
-        if (hit) { m_selectionManager.select(obj->getId(), ctrlPressed); lastFound = obj.get(); if (!ctrlPressed) break; }
+        if (o->getType() == Primitive::Type::Line) hit = GeometryCalc::isPointNearLine(p, static_cast<Line*>(o.get())->start(), static_cast<Line*>(o.get())->end(), 10.0);
+        else hit = GeometryCalc::isPointInCircle(p, static_cast<Circle*>(o.get())->center(), static_cast<Circle*>(o.get())->radius());
+        if (hit) { m_selectionManager.select(o->getId(), ctrl); last = o.get(); if (!ctrl) break; }
     }
-    m_propertyPanel->showProperties(lastFound, m_layerManager);
+    m_propertyPanel->showProperties(last, m_layerManager);
     updateCanvas();
 }
 
 void MainWindow::handleMove(double dx, double dy) {
-    int activeLayerId = m_layerManager.getActiveLayerId();
+    int activeId = m_layerManager.getActiveLayerId();
     for (int id : m_selectionManager.getSelectedIds()) {
-        for (auto& obj : m_primitives) {
-            if (obj->getId() == id && obj->getLayerId() == activeLayerId) obj->move(dx, dy);
-        }
+        for (auto& o : m_primitives) if (o->getId() == id && o->getLayerId() == activeId) o->move(dx, dy);
     }
     updateCanvas();
 }
 
 void MainWindow::addLayer() {
-    bool ok;
-    QString name = QInputDialog::getText(this, "New Layer", "Layer Name:", QLineEdit::Normal, "", &ok);
-    if (ok && !name.isEmpty()) { m_layerManager.createLayer(name.toStdString()); refreshLayerList(); }
+    bool ok; QString n = QInputDialog::getText(this, "Layer", "Name:", QLineEdit::Normal, "", &ok);
+    if (ok && !n.isEmpty()) { m_layerManager.createLayer(n.toStdString()); refreshLayerList(); }
 }
 
 void MainWindow::refreshLayerList() {
     m_layerCombo->clear();
-    for (auto const& [id, layer] : m_layerManager.getAllLayers()) m_layerCombo->addItem(QString::fromStdString(layer.name), id);
+    for (auto const& [id, l] : m_layerManager.getAllLayers()) m_layerCombo->addItem(QString::fromStdString(l.name), id);
 }
 
 void MainWindow::changeColor() {
@@ -198,6 +209,6 @@ void MainWindow::assignLayer() {
     updateCanvas();
 }
 
-void MainWindow::undoAction() { m_commandManager.undo(); m_selectionManager.clear(); m_propertyPanel->clearProperties(); updateCanvas(); }
+void MainWindow::undoAction() { m_commandManager.undo(); m_selectionManager.clear(); updateCanvas(); }
 
 MainWindow::~MainWindow() { delete ui; }
