@@ -13,7 +13,7 @@
 class Canvas : public QGraphicsScene {
     Q_OBJECT
 public:
-    enum class Tool { Select, Line, Circle };
+    enum class Tool { Select, Wall, Column };
 
     explicit Canvas(QObject* parent = nullptr);
 
@@ -28,16 +28,18 @@ signals:
     void circleFinished(Point center, double radius);
     void objectClicked(Point clickPoint, bool ctrlPressed);
     void objectMoved(double dx, double dy);
+    void mouseMoved(Point p);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
-
     void wheelEvent(QGraphicsSceneWheelEvent* event) override;
 
+    void drawBackground(QPainter* painter, const QRectF& rect) override;
+
 private:
-    Tool m_currentTool = Tool::Line;
+    Tool m_currentTool = Tool::Wall;
     bool m_isDrawing = false;
     bool m_isDragging = false;
 
@@ -46,6 +48,8 @@ private:
 
     QGraphicsLineItem* m_previewLine = nullptr;
     QGraphicsEllipseItem* m_previewCircle = nullptr;
+
+    QPointF snapPoint(QPointF p);
 };
 
 #endif

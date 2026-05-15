@@ -8,6 +8,7 @@
 #include <QMessageBox>
 #include <QShortcut>
 #include <QKeySequence>
+#include <QLabel>
 #include <QDebug>
 
 #include "../Core/Line.h"
@@ -17,6 +18,8 @@
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow) {
     ui->setupUi(this);
+
+    this->setWindowTitle("Mini-CAD Engineering Shell v1.0");
     this->showMaximized();
 
     m_canvas = new Canvas(this);
@@ -25,24 +28,31 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
         this->setCentralWidget(ui->graphicsView);
     }
 
+    QLabel* coordLabel = new QLabel("X: 0, Y: 0", this);
+    ui->statusBar->addPermanentWidget(coordLabel);
+    connect(m_canvas, &Canvas::mouseMoved, this, [coordLabel](Point p) {
+        coordLabel->setText(QString("X: %1, Y: %2").arg(p.x).arg(p.y));
+        });
+
     m_propertyPanel = new PropertyPanel(this);
-    QDockWidget* dock = new QDockWidget("Properties", this);
+    QDockWidget* dock = new QDockWidget("Object Properties", this);
     dock->setWidget(m_propertyPanel);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 
-    QToolBar* bar = new QToolBar(this);
+    QToolBar* bar = new QToolBar("Main Toolbar", this);
     addToolBar(bar);
 
     QPushButton* btnSel = new QPushButton("SELECT", this); bar->addWidget(btnSel);
     connect(btnSel, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Select); });
 
-    QPushButton* btnLine = new QPushButton("LINE", this); bar->addWidget(btnLine);
-    connect(btnLine, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Line); });
+    QPushButton* btnWall = new QPushButton("WALL", this); bar->addWidget(btnWall);
+    connect(btnWall, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Wall); });
 
-    QPushButton* btnCirc = new QPushButton("CIRCLE", this); bar->addWidget(btnCirc);
-    connect(btnCirc, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Circle); });
+    QPushButton* btnCol = new QPushButton("COLUMN", this); bar->addWidget(btnCol);
+    connect(btnCol, &QPushButton::clicked, [this]() { m_canvas->setTool(Canvas::Tool::Column); });
 
     bar->addSeparator();
+
     QPushButton* btnColor = new QPushButton("COLOR", this); bar->addWidget(btnColor);
     connect(btnColor, &QPushButton::clicked, this, &MainWindow::changeColor);
 
@@ -50,6 +60,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(btnAssign, &QPushButton::clicked, this, &MainWindow::assignLayer);
 
     bar->addSeparator();
+
     m_layerCombo = new QComboBox(this);
     bar->addWidget(m_layerCombo);
     refreshLayerList();
@@ -61,6 +72,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     connect(btnAddLayer, &QPushButton::clicked, this, &MainWindow::addLayer);
 
     bar->addSeparator();
+
+    QPushButton* btnUndo = new QPushButton("UNDO", this); bar->addWidget(btnUndo);
+    connect(btnUndo, &QPushButton::clicked, this, &MainWindow::undoAction);
+
     QShortcut* undoShortcut = new QShortcut(QKeySequence::Undo, this);
     connect(undoShortcut, &QShortcut::activated, this, &MainWindow::undoAction);
 
@@ -94,7 +109,7 @@ void MainWindow::handleSelection(Point p, bool ctrlPressed) {
         bool hit = false;
         if (obj->getType() == Primitive::Type::Line) {
             Line* l = static_cast<Line*>(obj.get());
-            hit = GeometryCalc::isPointNearLine(p, l->start(), l->end(), 7.0);
+            hit = GeometryCalc::isPointNearLine(p, l->start(), l->end(), 10.0);
         }
         else {
             Circle* c = static_cast<Circle*>(obj.get());
@@ -169,4 +184,6 @@ void MainWindow::undoAction() {
     updateCanvas();
 }
 
-MainWindow::~MainWindow() { delete ui; }
+MainWindow::~MainWindow() {
+    delete ui;
+}
