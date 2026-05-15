@@ -10,6 +10,9 @@ public:
 
     void move(double dx, double dy) override;
 
+    void setStart(Point p);
+    void setEnd(Point p);
+
     Point start() const;
     Point end() const;
 private:

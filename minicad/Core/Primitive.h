@@ -1,6 +1,7 @@
 #ifndef PRIMITIVE_H
 #define PRIMITIVE_H
 #include <string>
+#include <memory>
 
 struct Point {
     double x, y;
@@ -10,6 +11,9 @@ struct Point {
 class Primitive {
 public:
     enum class Type { Unknown, Line, Circle };
+
+    static std::unique_ptr<Primitive> create(Type type, int id, int layerId, Point p1, Point p2, double r);
+
     Primitive(int id, int layerId);
     virtual ~Primitive() = default;
 
@@ -20,7 +24,6 @@ public:
     int getId() const;
     int getLayerId() const;
     void setLayerId(int id);
-
     unsigned int getColor() const;
     void setColor(unsigned int color);
 

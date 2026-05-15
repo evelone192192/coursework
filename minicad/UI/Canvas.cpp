@@ -7,6 +7,7 @@
 #include <cmath>
 #include "../Core/Line.h" 
 #include "../Core/Circle.h" 
+#include "../Core/GeometryCalc.h"
 
 Canvas::Canvas(QObject* parent) : QGraphicsScene(parent) {
     setBackgroundBrush(Qt::white);
@@ -27,27 +28,27 @@ void Canvas::drawBackground(QPainter* painter, const QRectF& rect) {
     qreal left = std::floor(rect.left() / gridSize) * gridSize;
     qreal top = std::floor(rect.top() / gridSize) * gridSize;
 
-    QPen gridPen(QColor(230, 230, 230), 0.5);
+    QPen gridPen(QColor(235, 235, 235), 0.5);
     painter->setPen(gridPen);
+    for (qreal x = left; x < rect.right(); x += gridSize) painter->drawLine(x, rect.top(), x, rect.bottom());
+    for (qreal y = top; y < rect.bottom(); y += gridSize) painter->drawLine(rect.left(), y, rect.right(), y);
 
-    for (qreal x = left; x < rect.right(); x += gridSize)
-        painter->drawLine(x, rect.top(), x, rect.bottom());
-    for (qreal y = top; y < rect.bottom(); y += gridSize)
-        painter->drawLine(rect.left(), y, rect.right(), y);
-
-    painter->setPen(QPen(QColor(255, 0, 0, 100), 1));
+    painter->setPen(QPen(Qt::red, 2));
     painter->drawLine(0, rect.top(), 0, rect.bottom());
-    painter->setPen(QPen(QColor(0, 0, 255, 100), 1));
+
+    painter->setPen(QPen(Qt::blue, 2));
     painter->drawLine(rect.left(), 0, rect.right(), 0);
 }
 
 void Canvas::updateScene(const std::vector<std::unique_ptr<Primitive>>& primitives,
     const std::set<int>& selectedIds,
-    const std::map<int, int>& layerOrder) {
+    const std::map<int, int>& layerOrder,
+    int activeLayerId) {
     this->clear();
+    m_activeLayer = activeLayerId;
+
     std::vector<Primitive*> sorted;
     for (auto& p : primitives) sorted.push_back(p.get());
-
     std::sort(sorted.begin(), sorted.end(), [&](Primitive* a, Primitive* b) {
         int prA = layerOrder.count(a->getLayerId()) ? layerOrder.at(a->getLayerId()) : 0;
         int prB = layerOrder.count(b->getLayerId()) ? layerOrder.at(b->getLayerId()) : 0;
@@ -56,15 +57,30 @@ void Canvas::updateScene(const std::vector<std::unique_ptr<Primitive>>& primitiv
 
     for (auto* p : sorted) {
         bool isSel = selectedIds.count(p->getId());
-        QPen pen(isSel ? Qt::red : QColor::fromRgba(p->getColor()), isSel ? 3 : 2);
+        bool isActiveLayer = (p->getLayerId() == activeLayerId);
+
+        QColor color = QColor::fromRgba(p->getColor());
+        if (!isActiveLayer) color.setAlpha(60);
+        else color.setAlpha(255);
+
+        QPen pen(isSel ? Qt::red : color, isSel ? 3 : 2);
+
         if (p->getType() == Primitive::Type::Line) {
             Line* l = static_cast<Line*>(p);
             this->addLine(l->start().x, l->start().y, l->end().x, l->end().y, pen);
+            if (m_currentTool == Tool::Edit && isSel && isActiveLayer) {
+                this->addRect(l->start().x - 4, l->start().y - 4, 8, 8, QPen(Qt::darkBlue), QBrush(Qt::cyan));
+                this->addRect(l->end().x - 4, l->end().y - 4, 8, 8, QPen(Qt::darkBlue), QBrush(Qt::cyan));
+            }
         }
         else {
             Circle* c = static_cast<Circle*>(p);
             double r = c->radius();
             this->addEllipse(c->center().x - r, c->center().y - r, r * 2, r * 2, pen);
+            if (m_currentTool == Tool::Edit && isSel && isActiveLayer) {
+                this->addRect(c->center().x - 4, c->center().y - 4, 8, 8, QPen(Qt::darkBlue), QBrush(Qt::cyan));
+                this->addRect(c->center().x + r - 4, c->center().y - 4, 8, 8, QPen(Qt::darkBlue), QBrush(Qt::cyan));
+            }
         }
     }
 }
@@ -74,13 +90,13 @@ void Canvas::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         m_startPos = snapPoint(event->scenePos());
         m_lastMousePos = m_startPos;
 
-        if (m_currentTool == Tool::Select) {
+        if (m_currentTool == Tool::Edit || m_currentTool == Tool::Select) {
             emit objectClicked(Point(m_startPos.x(), m_startPos.y()), event->modifiers() & Qt::ControlModifier);
             m_isDragging = true;
         }
         else {
             m_isDrawing = true;
-            QPen p(Qt::blue, 1, Qt::DashLine);
+            QPen p(Qt::darkCyan, 1, Qt::DashLine);
             if (m_currentTool == Tool::Wall) {
                 m_previewLine = new QGraphicsLineItem(QLineF(m_startPos, m_startPos));
                 m_previewLine->setPen(p); addItem(m_previewLine);
@@ -95,22 +111,30 @@ void Canvas::mousePressEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void Canvas::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
-    QPointF currentPos = snapPoint(event->scenePos());
-    emit mouseMoved(Point(currentPos.x(), currentPos.y()));
+    QPointF currentPos = event->scenePos();
+    QPointF snappedPos = snapPoint(currentPos);
 
-    if (m_isDragging && m_currentTool == Tool::Select) {
-        double dx = currentPos.x() - m_lastMousePos.x();
-        double dy = currentPos.y() - m_lastMousePos.y();
-        if (std::abs(dx) > 0 || std::abs(dy) > 0) {
-            emit objectMoved(dx, dy);
-            m_lastMousePos = currentPos;
+    emit mouseMoved(Point(snappedPos.x(), snappedPos.y()));
+
+    if (m_isDragging) {
+        double dx = snappedPos.x() - m_lastMousePos.x();
+        double dy = snappedPos.y() - m_lastMousePos.y();
+
+        if (m_currentTool == Tool::Edit) {
+            emit vertexMoved(-1, -1, Point(snappedPos.x(), snappedPos.y()));
+        }
+        else {
+            if (std::abs(dx) > 0 || std::abs(dy) > 0) {
+                emit objectMoved(dx, dy);
+                m_lastMousePos = snappedPos;
+            }
         }
     }
     else if (m_isDrawing) {
         if (m_currentTool == Tool::Wall && m_previewLine)
-            m_previewLine->setLine(QLineF(m_startPos, currentPos));
+            m_previewLine->setLine(QLineF(m_startPos, snappedPos));
         else if (m_currentTool == Tool::Column && m_previewCircle) {
-            double r = QLineF(m_startPos, currentPos).length();
+            double r = QLineF(m_startPos, snappedPos).length();
             m_previewCircle->setRect(m_startPos.x() - r, m_startPos.y() - r, r * 2, r * 2);
         }
     }
@@ -118,17 +142,14 @@ void Canvas::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
 }
 
 void Canvas::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
-    if (event->button() == Qt::LeftButton) {
-        m_isDragging = false;
-        if (m_isDrawing) {
-            m_isDrawing = false;
-            QPointF endPos = snapPoint(event->scenePos());
-            if (m_previewLine) { removeItem(m_previewLine); delete m_previewLine; m_previewLine = nullptr; }
-            if (m_previewCircle) { removeItem(m_previewCircle); delete m_previewCircle; m_previewCircle = nullptr; }
-
-            if (m_currentTool == Tool::Wall) emit lineFinished(Point(m_startPos.x(), m_startPos.y()), Point(endPos.x(), endPos.y()));
-            else if (m_currentTool == Tool::Column) emit circleFinished(Point(m_startPos.x(), m_startPos.y()), QLineF(m_startPos, endPos).length());
-        }
+    m_isDragging = false;
+    if (m_isDrawing) {
+        m_isDrawing = false;
+        QPointF endPos = snapPoint(event->scenePos());
+        if (m_previewLine) { removeItem(m_previewLine); delete m_previewLine; m_previewLine = nullptr; }
+        if (m_previewCircle) { removeItem(m_previewCircle); delete m_previewCircle; m_previewCircle = nullptr; }
+        if (m_currentTool == Tool::Wall) emit lineFinished(Point(m_startPos.x(), m_startPos.y()), Point(endPos.x(), endPos.y()));
+        else if (m_currentTool == Tool::Column) emit circleFinished(Point(m_startPos.x(), m_startPos.y()), QLineF(m_startPos, endPos).length());
     }
     QGraphicsScene::mouseReleaseEvent(event);
 }
@@ -137,6 +158,7 @@ void Canvas::wheelEvent(QGraphicsSceneWheelEvent* event) {
     if (event->modifiers() & Qt::ControlModifier) {
         if (views().isEmpty()) return;
         double factor = (event->delta() > 0) ? 1.15 : 1.0 / 1.15;
+        views().first()->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
         views().first()->scale(factor, factor);
         event->accept();
     }

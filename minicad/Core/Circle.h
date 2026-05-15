@@ -8,12 +8,13 @@ public:
     Type getType() const override;
     std::string getInfo() const override;
 
-    void move(double dx, double dy) override {
-        m_center.x += dx; m_center.y += dy;
-    }
+    void move(double dx, double dy) override;
 
-    Point center() const { return m_center; }
-    double radius() const { return m_radius; }
+    void setCenter(Point p);
+    void setRadius(double r);
+
+    Point center() const;
+    double radius() const;
 private:
     Point m_center;
     double m_radius;
